@@ -12,7 +12,7 @@ export default function ButtonCircle({
   return (
     <button
       {...props}
-      className={`${color} font-semibold rounded-full h-9 w-9 p-3 flex justify-center items-center cursor-pointer`}
+      className={`${color} font-semibold rounded-full h-9 w-9 p-3 flex justify-center items-center cursor-pointer disabled:cursor-not-allowed disabled:opacity-50`}
     >
       {children}
     </button>

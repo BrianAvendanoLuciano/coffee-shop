@@ -1,101 +1,132 @@
 'use client';
 
-import ButtonCircle from '@/components/button/circle-button';
+import dynamic from 'next/dynamic';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
+import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import ContentWrapper from '@/components/dashboard/main-content-wrapper';
-import Modal from '@/components/modal';
+import CartPanel from '@/components/order/cart-panel';
 import OrderItem from '@/components/order/item';
-import OrderCartItem from '@/components/order/order-cart-item';
-import { products } from '@/constants/products';
-import { OrderItems, Product, ProductVariant } from '@/types/common';
-import { ModalHandle } from '@/types/ui';
-import { useRef, useState } from 'react';
+import QueryError from '@/components/query-error';
+import { CATEGORY_TABS, isCategoryId } from '@/constants/categories';
+import { useDebouncedValue } from '@/hooks/useDebouncedValue';
+import { useOnVisible } from '@/hooks/useOnVisible';
+import { useInfiniteProducts } from '@/lib/queries/products';
+import type { Product } from '@/types/common';
 
-const cartItems = [
-  { ...products[0] },
-  { ...products[2] },
-  { ...products[3] },
-  { ...products[5] },
-];
+// Lazy loading / code splitting: the dialog's JavaScript is a separate chunk
+// that is only downloaded the first time someone taps "+", so it does not
+// slow down the first paint of the menu.
+const CustomizeDialog = dynamic(
+  () => import('@/components/order/customize-dialog'),
+  { ssr: false },
+);
 
-const extras = ['Sugar', 'Milk', 'Expresso'];
+function OrderScreen() {
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
 
-export default function OrderPage() {
-  const modalRef = useRef<ModalHandle>(null);
+  // The URL is the source of truth for the filters (?category=cat-tea&q=latte)
+  // so a filtered view survives a reload and can be bookmarked. The raw
+  // string is narrowed to a CategoryId before anything else trusts it.
+  const categoryParam = searchParams.get('category');
+  const category = isCategoryId(categoryParam) ? categoryParam : undefined;
+  const q = searchParams.get('q') ?? '';
+
+  // Controlled input: what you see in the box is exactly this state.
+  const [searchText, setSearchText] = useState(q);
+  const debouncedSearch = useDebouncedValue(searchText.trim());
+
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
-  const [selectedVariant, setSelectedVariant] = useState<ProductVariant | null>(
-    null,
+
+  const setParam = useCallback(
+    (name: string, value: string | undefined) => {
+      const next = new URLSearchParams(searchParams);
+      if (value) next.set(name, value);
+      else next.delete(name);
+
+      const query = next.toString();
+      router.replace(query ? `${pathname}?${query}` : pathname, {
+        scroll: false,
+      });
+    },
+    [pathname, router, searchParams],
   );
-  const [cartItems, setCartItems] = useState<OrderItems[]>([]);
 
-  const handleSelectedProduct = (product: Product) => {
-    console.log(product);
+  // Effect = synchronising with something outside React, here the URL. The
+  // dependency array lists every value the effect reads; it re-runs only
+  // when one of them changes.
+  useEffect(() => {
+    if (debouncedSearch !== q) setParam('q', debouncedSearch || undefined);
+  }, [debouncedSearch, q, setParam]);
+
+  // A new object every render would be a new query key every render.
+  const filters = useMemo(
+    () => ({ category, q: q || undefined }),
+    [category, q],
+  );
+
+  const {
+    data: products,
+    error,
+    isPending,
+    isPlaceholderData,
+    hasNextPage,
+    isFetchingNextPage,
+    fetchNextPage,
+    refetch,
+  } = useInfiniteProducts(filters);
+
+  const sentinelRef = useOnVisible<HTMLDivElement>(
+    () => void fetchNextPage(),
+    hasNextPage && !isFetchingNextPage,
+  );
+
+  // Stable function identity, so the memoized cards are not re-rendered
+  // every time this component is.
+  const handleSelectedProduct = useCallback((product: Product) => {
     setSelectedProduct(product);
-    modalRef.current?.open();
-  };
+  }, []);
 
-  const handleUnselectProduct = () => setSelectedProduct(null);
+  const handleCloseDialog = useCallback(() => setSelectedProduct(null), []);
 
-  const handleAddOrder = () => {
-    if (!selectedProduct || !selectedVariant) {
-      return;
-    }
-    console.log('selectedProduct', selectedProduct);
-    const orderItem: OrderItems = {
-      id: crypto.randomUUID(),
-      orderId: '',
-
-      productId: selectedProduct.id,
-      productVariantId: selectedVariant.id,
-
-      productName: selectedProduct.name,
-      size: selectedVariant.size,
-      unitPrice: selectedVariant.price,
-      subtotal: selectedVariant.price * 1,
-
-      createdAt: new Date().toISOString(),
-    };
-
-    setCartItems((prev) => [...prev, orderItem]);
-
-    setSelectedProduct(null);
-    setSelectedVariant(null);
-  };
   return (
     <ContentWrapper>
       <h1 className="text-2xl font-semibold">Order</h1>
-      <p className="">Choose something to enjoy.</p>
+      <p>Choose something to enjoy.</p>
 
-      <div className="flex justify-between mt-4">
-        <ul id="order-category-tabs" className="flex gap-1">
-          <li>
-            <button className="w-24 p-2 rounded-3xl text-slate-600 hover:bg-amber-500 hover:text-white cursor-pointer">
-              All
-            </button>
-          </li>
-          <li>
-            <button className="w-24 p-2 rounded-3xl text-slate-600 hover:bg-amber-500 hover:text-white cursor-pointer">
-              Coffee
-            </button>
-          </li>
-          <li>
-            <button className="w-24 p-2 rounded-3xl text-slate-600 hover:bg-amber-500 hover:text-white cursor-pointer">
-              Tea
-            </button>
-          </li>
-          <li>
-            <button className="w-24 p-2 rounded-3xl text-slate-600 hover:bg-amber-500 hover:text-white cursor-pointer">
-              Pastries
-            </button>
-          </li>
-          <li>
-            <button className="w-24 p-2 rounded-3xl text-slate-600 hover:bg-amber-500 hover:text-white cursor-pointer">
-              Desserts
-            </button>
-          </li>
+      <div className="flex flex-wrap justify-between gap-2 mt-4">
+        <ul className="flex flex-wrap gap-1" aria-label="Categories">
+          {CATEGORY_TABS.map((tab) => {
+            const isActive = tab.id === (category ?? 'all');
+            return (
+              <li key={tab.id}>
+                <button
+                  type="button"
+                  aria-pressed={isActive}
+                  onClick={() =>
+                    setParam('category', tab.id === 'all' ? undefined : tab.id)
+                  }
+                  className={`w-24 p-2 rounded-3xl cursor-pointer hover:bg-amber-500 hover:text-white ${
+                    isActive ? 'bg-amber-500 text-white' : 'text-slate-600'
+                  }`}
+                >
+                  {tab.label}
+                </button>
+              </li>
+            );
+          })}
         </ul>
         <div>
+          <label htmlFor="product-search" className="sr-only">
+            Search products
+          </label>
           <input
-            className="text-sm mr-10 w-full p-2"
+            id="product-search"
+            type="search"
+            value={searchText}
+            onChange={(event) => setSearchText(event.target.value)}
+            className="text-sm w-64 p-2"
             placeholder="Search coffee, tea, pastries..."
           />
         </div>
@@ -103,130 +134,91 @@ export default function OrderPage() {
       <hr className="w-full border-b border-slate-200" />
 
       <div className="grid grid-cols-1 gap-6 xl:grid-cols-[1fr_360px]">
-        <section className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-          {products.map((item) => (
-            <OrderItem
-              key={item.id}
-              product={item}
-              handleSelectedProduct={handleSelectedProduct}
-            />
-          ))}
-        </section>
-        <aside className="sticky top-6 h-fit mt-6">
-          <div className="rounded-xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
-            <h1 className="text-2xl font-semibold">Order Summary</h1>
-            <section id="cart-list">
-              {cartItems?.map((cartItem) => (
-                <OrderCartItem key={`cart-${cartItem.id}`} order={cartItem} />
+        <section aria-label="Products" aria-busy={isPending}>
+          {/* Conditional rendering: exactly one of these branches shows. */}
+          {error ? (
+            <div className="mt-6">
+              <QueryError error={error} onRetry={() => void refetch()} />
+            </div>
+          ) : isPending ? (
+            <ProductGridSkeleton />
+          ) : products.length === 0 ? (
+            <p className="mt-10 text-center text-slate-500">
+              No products match your search.
+            </p>
+          ) : (
+            <div
+              className={`mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 transition-opacity ${
+                isPlaceholderData ? 'opacity-50' : ''
+              }`}
+            >
+              {/* `key` tells React which card is which between renders. A
+                  stable id (never the array index) lets it move and reuse
+                  DOM nodes instead of rebuilding them when the list changes. */}
+              {products.map((item) => (
+                <OrderItem
+                  key={item.id}
+                  product={item}
+                  handleSelectedProduct={handleSelectedProduct}
+                />
               ))}
-            </section>
-            <section id="cart-price-section w-full">
-              <div className="flex justify-between my-4">
-                <p className="text-xl">Total</p> <p>$4</p>
-              </div>
-              <button className="bg-amber-500 w-full rounded-2xl p-2 text-white cursor-pointer hover:bg-amber-600">
-                Place Order
-              </button>
-            </section>
-          </div>
-        </aside>
-      </div>
-      <Modal open={selectedProduct !== null} onClose={handleUnselectProduct}>
-        <header className="flex justify-between items-center p-2">
-          <p className="text-2xl font-semibold text-slate-800">
-            Add {selectedProduct?.name}
-          </p>
-          <ButtonCircle
-            onClick={handleUnselectProduct}
-            aria-label="Close"
-            reverse={true}
-          >
-            X
-          </ButtonCircle>
-        </header>
-        <hr className="w-full border-b border-slate-200" />
-        <div className="my-4">
-          {selectedProduct?.variants.length && (
-            <fieldset className="my-4">
-              <legend className="font-semibold mb-2">Size</legend>
-              <div className="grid grid-cols-3 gap-2">
-                {selectedProduct?.variants.map((variant) => (
-                  <label
-                    className={`
-                      px-3 py-2 flex flex-col border
-                      rounded-2xl shadow-md cursor-pointer 
-                      ${selectedVariant?.id === variant.id ? 'bg-amber-200 text-amber-800 border-amber-800' : 'border-slate-200 '}
-                      hover:bg-amber-200 hover:text-amber-800 hover:border-amber-800  
-                    `}
-                    key={variant.id}
-                  >
-                    <span className="flex justify-between gap-2 items-center text-sm">
-                      <span>{variant.size}</span>
-                      <input
-                        type="radio"
-                        name="size"
-                        className="accent-amber-600 h-4 w-4"
-                        value={variant.id}
-                        onChange={(e) => setSelectedVariant(variant)}
-                      />
-                    </span>
-                    <span className="font-semibold">₱{variant.price}</span>
-                  </label>
-                ))}
-              </div>
-            </fieldset>
+            </div>
           )}
-          <div>
-            <label className="font-semibold">Quantity</label>
-            <div className="flex justify-center gap-4 items-center mt-2">
-              <ButtonCircle>-</ButtonCircle>
 
-              <span>1</span>
-              <ButtonCircle>+</ButtonCircle>
+          <div ref={sentinelRef} className="h-4" />
+          {hasNextPage && (
+            <div className="mt-2 flex justify-center">
+              <button
+                type="button"
+                onClick={() => void fetchNextPage()}
+                disabled={isFetchingNextPage}
+                className="cursor-pointer rounded-3xl px-4 py-2 text-sm text-amber-700 hover:bg-amber-100 disabled:opacity-60"
+              >
+                {isFetchingNextPage ? 'Loading more…' : 'Load more'}
+              </button>
             </div>
-          </div>
-          <div>
-            <label className="font-semibold">Extra</label>
-            <div className="flex flex-col gap-2 mt-2">
-              {extras.map((extra) => (
-                <label
-                  className={`
-                  px-3 py-2 flex border w-full
-                  justify-between items-center 
-                  rounded-2xl shadow-md cursor-pointer 
-                  'bg-amber-200 text-amber-800 border-amber-800'
-                  hover:bg-amber-200 hover:text-amber-800 hover:border-amber-800  
-                `}
-                >
-                  <input
-                    type="checkbox"
-                    name="size"
-                    className="accent-amber-600 h-4 w-4"
-                    value="sugar"
-                  />
-                  <span>{extra}</span>
+          )}
+        </section>
 
-                  <span className="font-semibold text-center">₱0</span>
-                </label>
-              ))}
-            </div>
-          </div>
-        </div>
-        <hr className="w-full border-b border-slate-200" />
-        <footer className="my-4 flex justify-between items-center">
-          <span className="font-semibold">
-            <p>Total:</p>
-            <p>₱120</p>
-          </span>
-          <button
-            onClick={handleAddOrder}
-            type="button"
-            className="bg-amber-500 p-4 text-sm text-white cursor-pointer rounded-xl hover:bg-amber-600"
-          >
-            Add to Order
-          </button>
-        </footer>
-      </Modal>
+        <CartPanel />
+      </div>
+
+      {/* The key resets the dialog's internal state (size, quantity, extras)
+          whenever a different product is opened: a new key is a new component
+          instance. */}
+      {selectedProduct && (
+        <CustomizeDialog
+          key={selectedProduct.id}
+          product={selectedProduct}
+          onClose={handleCloseDialog}
+        />
+      )}
     </ContentWrapper>
+  );
+}
+
+function ProductGridSkeleton() {
+  return (
+    <div
+      aria-hidden
+      className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
+    >
+      {Array.from({ length: 8 }, (_, index) => (
+        <div
+          key={index}
+          className="h-64 animate-pulse rounded-xl bg-slate-200"
+        />
+      ))}
+    </div>
+  );
+}
+
+export default function OrderPage() {
+  // useSearchParams needs a Suspense boundary above it so the rest of the
+  // page can still be prerendered.
+  return (
+    <Suspense fallback={null}>
+      <OrderScreen />
+    </Suspense>
   );
 }

@@ -1,11 +1,14 @@
-import { InputHTMLAttributes } from "react";
+import { InputHTMLAttributes } from 'react';
 
 interface Props extends InputHTMLAttributes<HTMLInputElement> {
   name: string;
   label?: string;
+  error?: string;
 }
 
-export default function Input({ name, label, ...props }: Props) {
+export default function Input({ name, label, error, ...props }: Props) {
+  const errorId = `${name}-error`;
+
   return (
     <>
       {label && (
@@ -21,10 +24,21 @@ export default function Input({ name, label, ...props }: Props) {
         id={name}
         name={name}
         type="text"
-        className="w-full rounded-md border border-stone-200 bg-white px-3 py-2.5 text-sm text-stone-900 outline-none placeholder:text-stone-400 focus:border-amber-500 focus:ring-2 focus:ring-amber-500/20"
-        placeholder={props?.placeholder}
+        aria-invalid={error ? true : undefined}
+        aria-describedby={error ? errorId : undefined}
+        className={`w-full rounded-md border bg-white px-3 py-2.5 text-sm text-stone-900 outline-none placeholder:text-stone-400 focus:ring-2 ${
+          error
+            ? 'border-red-500 focus:border-red-500 focus:ring-red-500/20'
+            : 'border-stone-200 focus:border-amber-500 focus:ring-amber-500/20'
+        }`}
         {...props}
       />
+
+      {error && (
+        <p id={errorId} role="alert" className="mt-1 text-xs text-red-600">
+          {error}
+        </p>
+      )}
     </>
   );
 }

@@ -1,9 +1,10 @@
 'use client';
 
 import Link from 'next/link';
-import { Dispatch, SetStateAction, useEffect, useState } from 'react';
+import { Dispatch, SetStateAction, useState } from 'react';
 import { icons } from './icons';
 import { usePathname } from 'next/navigation';
+import { useLogout, useSession } from '@/lib/queries/auth';
 
 const navLinks = [
   { path: '/order', icon: icons.order, label: 'Order' },
@@ -30,7 +31,8 @@ interface Props {
 export default function Sidebar({ isMinimized, setIsMinimized }: Props) {
   const [isProductMenuVisible, setIsProductMenuVisible] = useState(false);
   const path = usePathname();
-  console.log('path', path);
+  const { data: user } = useSession();
+  const logout = useLogout();
   const isActivePath = (link: string, useInclude?: boolean) => {
     if (useInclude) return path.includes(link);
     return link === path;
@@ -216,6 +218,11 @@ export default function Sidebar({ isMinimized, setIsMinimized }: Props) {
         </ul>
 
         <div className="w-full mt-auto p-3">
+          {!isMinimized && user && (
+            <p className="px-4 py-2 text-xs text-slate-500">
+              Signed in as {user.name}
+            </p>
+          )}
           <button
             className="flex gap-3 w-full rounded-md px-4 py-3
                text-slate-700 transition-colors
@@ -230,9 +237,13 @@ export default function Sidebar({ isMinimized, setIsMinimized }: Props) {
                text-slate-700 transition-colors
                hover:bg-amber-100 hover:text-amber-700
                cursor-pointer"
+            type="button"
+            title="Logout"
+            disabled={logout.isPending}
+            onClick={() => logout.mutate()}
           >
             {icons.logout}
-            {!isMinimized && 'Logout'}
+            {!isMinimized && (logout.isPending ? 'Signing out…' : 'Logout')}
           </button>
         </div>
       </nav>
